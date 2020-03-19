@@ -1,0 +1,109 @@
+#+TITLE:   Git Flow
+
+* .ssh/config
+Pour se connecter, il est préférable d'utiliser des clés ssh. On peut en générer une pour chaque compte et définir dans le fichier ~/.ssh/config comment utiliser chacune des clés. Il est possible d'avoir des comptes différents pour un même fournisseur de service. Il est alors pratique de définir le host de la même façon qu'il est défini lors de l'importation du projet. Cela évite d'avoir à modifier l'adresse par défaut. 
+#+begin_src
+Host gitlab.com
+     Hostname gitlab.com
+     IdentityFile ~/.ssh/id_gitlabcom
+     IdentitiesOnly yes
+
+Host github.com:user1
+     Hostname github.com:user1
+     IdentityFile ~/.ssh/id_githubcom
+     IdentitiesOnly yes
+
+Host github.com:user2
+     Hostname github.com:user2
+     IdentityFile ~/.ssh/id_user2_githubcom
+     IdentitiesOnly yes
+     
+Host github.com
+     Hostname github.com
+     IdentityFile ~/.ssh/id_githubcom
+     IdentityFile ~/.ssh/id_user2_githubcom
+     IdentitiesOnly yes
+#+end_src
+Dans le fichier de config, plusieurs définitions de Host peuvent être valides. La première valeur rencontrée d'un paramètre donné est utilisée. Les valeurs spécifiques doivent donc être au début du fichier et celles génériques vers la fin du fichier. Les options de tous les hosts qui matchent à la définition de la connexion en cours sont parcourues, seulement les options qui n'ont pas été définies précédemment prendront la valeur du paramètre dans un match subséquent. Le champ IdentityFile a un comportement différent, ou plusieurs directives vont ajouter ces clés à la liste des clés testées.
+
+* git user config
+C'est bien d'avoir plusieurs comptes, mais les commits sont signés avec l'adresse courriel définie, et ça ne peut pas être la même pour deux comptes chez un même fournisseur. Il faut soit définir localement pour chaque projet quelle adresse courriel employer pour que les commits apparaissent comme étant réalisés par le bon compte. Une façon de faire est que la configuration globale soit conditionnelle au chemin où est le projet ([[https://git-scm.com/docs/git-config#_conditional_includes][git conditional includes]]). Dans le fichier de config, la dernière valeur lue a préséance sur les autres. Ainsi, avec une architecture de fichiers assez standard, il est possible de définir que tous les projets dans un chemin devraient utiliser un identifiant ou un autre. 
+#+begin_src 
+[user] # default values
+name = My Name
+email = my@name.com
+
+[includeIf "gitdir:~/folder/user1/"] # specific values
+  path = .gitconfig-user1
+[includeIf "gitdir:~/folder/user2/"]
+  path = .gitconfig-user2
+; include only if we are in a worktree where foo-branch is
+; currently checked out
+[includeIf "onbranch:foo-branch"]
+	path = foo.inc
+
+
+#+end_src
+Les deux fichiers de configuration contenant les valeurs spécifiques.
+.gitconfig-user1
+#+begin_src 
+[user]
+email = my.name@user1.net
+#+end_src
+.gitconfig-user2
+#+begin_src 
+[user]
+email = mn@user2.com
+#+end_src
+
+[[https://stackoverflow.com/a/42354282][Cette autre solution]] semble aussi très prometteuse en utilisant plutôt le remote pour définir quel fichier de configuration inclure.
+
+* public repo without personal information
+It's interesting to share config files or other things, but I don't like my private information to become public. One way is to have two branches. One private and one public. We are always working on our private/active branch, and when we want to publish our config, we merge it in the public one and push it. To make sure our private information is not merged, we can define a merge driver and use .gitattributes.
+
+First, we need to create a merge driver that always favours selected files on the branch instead of one coming from the merge. This way, merge don't see anything to do with this file and don't touch it. 
+#+begin_src
+git config [--global] merge.ours.driver true
+#+end_src
+See [[https://git-scm.com/docs/gitattributes#_defining_a_custom_merge_driver][merge driver documentation]]. (It is possible to create this config local to the repository or globally for any git repository using the --global in the command line.) 
+
+We just created a merge driver called ours that returns true when we try to merge the specifics files defined to use this driver. Returning true means that the merge was clean, but this driver doesn't do anything to the file.
+
+To define the files that will use this driver, we need to create a file named .gitattributes and include the following lines:
+#+begin_src
+<file_name> merge=ours
+#+end_src
+To make sure it works properly, the public branch must be issued from the private one and be modified after the first commit. All others merges in the public branch must come from the private one. This way, there is always a conflict between the two branches and our merge driver will be used. If there is no conflict, the merge driver won't be used, and our file could be modified. One way to make it work properly could be to create only an empty file at the beginning while creating the private and public branches and add specific configurations to each branch only after. 
+
+To start from the public branch on github to start a new project, a way to do is to derive two branches from this public one, the private one and a local public one that will be used to squash back updates in the master and then to push/pull master on the remote repo. The important aspect is to not directly merge the local public branch back in the private one even through the master branch. Using squash allows making the update separate, but may have other drawbacks.
+
+So now we can merge our private branch in our public one without worries. I usually use this setup to define specific environment variables that I will use in my main file, to have a specific configuration.
+
+My flow looks like this
+#+begin_src 
+                               /                     / squash merge public into master
+master(same as bot.) x--------x-------x-------------x  
+                      \                \                 
+feature_br             \    x---x---x   \
+   start w. empty conf file  \     /     \ merge master into private
+private                  x-x--x---x---x---x----x----o
+                          \    \  |    \   \         \
+feature_br2                \    \ x--x--x   \         \
+                            \    \           \         merge private into public(no squash)
+local_public                 x-x--x-----------x---------x     
+                                 /                     /       
+                                /                     /           
+                               /                     / squash merge public into master
+master(same as top)  x--------x-------x-------------x  
+                      \                \                 
+ 
+#+end_src
+
+* Alias utiles
+
+** Un joli log
+#+begin_src 
+[alias]
+	lg = log --color --graph --pretty=format:'%Cred%h%Creset -%C(yellow)%d%Creset %s %Cgreen(%cr) %C(bold blue)<%an>%Creset' --abbrev-commit
+
+#+end_src
